@@ -20,7 +20,7 @@
 
 ## Introduction
 
-A direct excerpt from the GitHub Discussion that preceded this proposal: [#5304]().
+A direct excerpt from the GitHub Discussion that preceded this proposal: [#5304](https://github.com/OAI/sig-security/discussions/50).
 
 > This proposal [therefore] suggests a way forward on unlocking the means to describe security profiles in a suitably deterministic and loosely coupled way that provides API consumers with the affordances required to accurately understand the security requirements for a given Operation.
 
@@ -69,7 +69,7 @@ The features of the approach all support creating an OpenAPI description documen
 
 | Item | Type | Maintained By |
 | --- | --- | --- |
-| RFC describing a security feature | OpenAPI Security Specification | Security SIG |
+| RFC describing a security feature, either encapsulating the entire RFC or through a normalized object | OpenAPI Security Specification | Security SIG |
 | Security feature with additional constraints on an RFC | Security Profile Framework | Security Profile |
 | A constrained or tailored version of a Security Profile | Ecosystem Registry | Ecosystem Team |
 | An API description that enforces security requirements for a given resource (that is describes) | OpenAPI Description Document | Standards Owner or API Provider |
@@ -92,7 +92,7 @@ An example of this is a JSON Web Token (JWT). JWTs are protocol-bound through [J
 
 The table below provides a list of candidate objects, some of which overlap with existing Security Scheme Objects (for which there will need to be a suitable approach to deprecating, in readiness for a future major version). All of these objects will be expanded upon in the [Detailed Design](#detailed-design) section.
 
-> **Please note that this list may include objects that already have some representation in existing versions of the OpenAPI Specification. The list is intended to provide "feature completeness" and how to deal with existing Security Scheme Object variants needs to be discussed and agreed by TSC and the active community participants.**
+> **Please note that this list may include objects that already have some representation in existing versions of the OpenAPI Specification. The list is intended to provide candidate features and how to deal with existing Security Scheme Object variants needs to be discussed and agreed by TSC and the active community participants.**
 
 | Object | Description | Rationale |
 | --- | --- | --- |
@@ -103,6 +103,7 @@ The table below provides a list of candidate objects, some of which overlap with
 | Access Request | Describes the parameters of a request that carries structured information about the access being sought, independent of the surrounding protocol envelope. | Named directly after GNAP's own `access` terminology ([RFC 9635](https://www.rfc-editor.org/info/rfc9635/)), since GNAP's Grant Request has no separate "authorization request" step to attach structured content to. The name is not a stretch for FAPI 2.0 either — Rich Authorization Request ([RFC 9396](https://www.rfc-editor.org/info/rfc9396/)) describes the same shape, a typed, structured description of what's being asked for, just riding inside an OAuth Authorization Request rather than standing alone. |
 | Token | Describes a token issued to the client that is intended to be consumed for its context, rather than treated as an opaque bearer credential — for example an OpenID Connect ID Token. Built on the JSON Web Token object, but scoped to the claims a client is expected to read and validate locally (e.g. `iss`, `sub`, `aud`, `nonce`, `acr`, `auth_time`, and profile-specific claims). | Access Tokens are deliberately opaque to the client under OAuth 2.0, but ID Tokens (and similar context-carrying tokens) are explicitly meant for client-side parsing and validation. Without a dedicated object, there is no deterministic way to describe what an ID Token looks like for a given API, forcing clients to fall back on generic OIDC assumptions rather than what the API/profile actually issues. |
 | Pushed Authorization Request (PAR) | Explicitly describes [RFC 9126](https://www.rfc-editor.org/info/rfc9126/), which is a mechanism to transport an Access Request with appropriate encapsulation to an Authorization Server | PAR is a mandatory building block of FAPI 2.0, is an optional component of FAPI 1.0 Advanced, and is being included in other OpenID related protocols. Adding this to the OSS seems a sensible move, based on adoption. |
+| OAuth Profile | Describes a given OAuth grant type, but using discovery and object references to drive the shape of the object. The OAuth Profile object references other objects described above to provide enough information to the client to understand the security constraints applied to a given resource. |
 
 ### Security Profile Framework
 
@@ -139,9 +140,17 @@ The Ecosystem Registry therefore provides a second, narrower _extension point_, 
 
 ## Detailed design
 
-_Describe the design of the solution in detail. This should include an exact description of the changes to the contents of the OpenAPI specification. That description should include a extract of each section of the OpenAPI specification which is impacted by the proposal with all proposed modifications applied. These extracts may be provided through additional files which are identified and described in this section._
+The sections below are intended to provide the following:
+
+1. Highlight design constraints I have attempt to implement through writing this proposal.
+2. Outline the objects the OSS will implement.
+3. Use FAPI 2.0 and GNAP to show how the objects and the design constraints can be implemented in practice.
+
+The target outcome is to ensure that readers can fully comprehend the core structure of OSS, how a profile is overlaid, and the "shape" of the proposed objects.
 
 ### Design Constraints
+
+The table below provides the high-level design constraints used in this proposal.
 
 | Principle | Rationale |
 | --- | --- |
@@ -149,6 +158,18 @@ _Describe the design of the solution in detail. This should include an exact des
 | JWTs are not just data. | JWTs represent processing behaviors as well as data, and therefore need a specific object with deterministic scope to be correctly represented in OpenAPI. |
 | Security features must be normalized wherever possible to provide consistent object models | Provides consistent object naming practices and prevents sprawl |
 | All features, where applicable, must provide a strong programmatic indicate of what the underlying RFC or security profile | Provides humans and agents a clear and deterministic reference of the underlying corpus of knowledge that can be used for reference or inference |
+
+### Key Design Feature: The `implements` Property
+
+As is evident from the FAPI 2.0 RFC map above, security specifications and profiles are a composite of many RFCs. However, different RFCs can also represent the same feature or function of a specification, as is evident from the OAS and especially existing Security Scheme objects. As per the [Design Constraints](#design-constraints) it also makes sense to normalize objects, as regardless of their provenance having a standardized object for a given common feature reduces sprawl and cognitive load for humans.
+
+There is also a question of "signaling" what a given object relates to i.e. how can a given object make it abundantly clear what the underlying security constraint is?
+
+This proposal puts forth the idea of the `implements` property, which will define the underlying RFC, BCP, or Security Profile to which a given object relates. `implements` will be an enumerated list of values, defined by either the OSS or a Security Profile, that provides a deterministic pointer to what the security constraint aligns to. Humans and/or agents will use this as a hook to provide or infer context, so as to make informed decisions about how to interpret the security constraint.
+
+> Note that using `implements` in this way is only intended to be a high-level indicator, to ensure that there is a valid pointer to a source of truth. Reviewers should ask themselves this question: Is this enough? Do humans and agents need more context, in order to process the underlying requirements? This feedback is key to helping progress this proposal.
+
+In the sections below the proposed object shapes will show the use of `implements` and how it is leveraged in the examples provided.
 
 ### OpenAPI Security Specification Objects
 
@@ -330,106 +351,150 @@ Where
 
 Note the absence of an `implements` flag here. A Pushed Authorization Request is "self-describing" and denormalized, in that it encapsulates all of RFC 9126, so `implements` is considered unnecessary.
 
-### Alignment to Proposal: FAPI 2.0 Security Profile
+#### OAuth Profile
 
-Considering the following components of FAPI:
+An OAuth Profile Object describes a specific OAuth 2.0 grant type end-to-end — endpoint resolution, how the request is staged, and any OAuth-bound mechanics such as PKCE — by composing references to the objects described above, rather than restating protocol details inline. This is the OSS replacement for the existing Security Scheme OAuth Flow Object, where a Flow Object requires a fixed metadata footprint (`tokenUrl`, `authorizationUrl`, etc). This approach removes the close coupling with OAS, as the current implementation requires these parameters regardless of whether that data already exists at a discovery endpoint. The OAuth Profile Object resolves that footprint from a Discovery Object at runtime instead.
 
-OAuth Flows and Flow Objects are replaced by the Discovery Object and OAuth Profile object.
+The OAuth Profile object is **key** in this list of examples because **this is what performs the function of the Security Scheme and is referenced as a Security Requirement**.
 
-A Discovery Object sets a universal point of reference for an OpenID Discovery or OAuth Server Metadata server. The Discovery makes no assertions about the shape other than to set a profile, which would nominally be [OIDC Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html) or [OAuth Server Metadata (RFC 8414)](https://www.rfc-editor.org/info/rfc8414).
-
-```yaml
-components:
-  security:
-    OAuthWellKnown:
-      type: Rfc8414
-      urls:
-        - name: Development
-          environment: dev
-          url: https://example.com/dev/.well-known/oauth-authorization-server
-        - name: Certification
-          environment: cert
-          url: https://example.com/cert/.well-known/oauth-authorization-server
-        - name: Production
-          environment: prod
-          url: https://example.com/prod/.well-known/oauth-authorization-server
-```
-
-An OAuth Profile Object is then largely driven by discovery data, because there is no requirement to restate properties that are available from the Discovery Object. This is one aspect of where the SAF construct _may_ become important, because the expectation is that the resolution of this information happens at runtime. This adopts an existing behaviour - Discovery is loosely supported in the OpenAPI Specification right now - but the intention is make this more deterministic, with the Security Profile Framework making the declaration of security scope more deterministic.
+The example below shows an Authorization Code grant in an OAD:
 
 ```yaml
-components:
-  security:
-    AuthCodeFlow:
-      type: oauthAuthCodeFlow
-      discovery: "#/components/security/OAuthWellKnown"
-```
-
-The `AuthCodeFlow` object here is of the type `oauthAuthCodeFlow`, which indicates an Authorization Code grant type that adheres to boilerplate OAuth 2.0 semantics. With limited other information (like for example `client_id` and `client_secret`) a client could be generated on based on this information alone.
-
-However, a FAPI 2.0 compliant Authorization Code grant type has a number of constraints and requirements beyond boilerplate OAuth 2.0, such as:
-
-- Requires a Pushed Authorization Request to stage an Authorization Request
-
-PKCE is an OAuth-bound requirement, and therefore becomes part of the OAuth Profile.
-
-An OAuth Profile Object therefore defines the complete requirements for a Client attempting to elicit an Access Token to access a resource.
-
-The example below shows how this would be expressed in an OAD, with `profile` indicating additional constraints are imposed by the `fapi20` Security Profile:
-
-```yaml
-AuthCodeFlow:
-  profile: fapi20
-  type: oauthAuthCodeFlow
-  discovery: "#/components/security/OAuthWellKnown"
+AuthorizationCodeProfile:
+  implements: Rfc6749
+  type: authorizationCode
+  discovery:
+    $ref: "#/components/security/OAuthMetadataDiscovery"
   authorizationRequest:
     $ref: "#/components/authorizationRequests/PushedAuthorizationRequest"
-  pkce: true
+  pkce: false
+  scopes:
+    - account:read
+    - account:write
 ```
 
 Where:
 
--
+- `implements` indicates adherence to [RFC 6749](https://www.rfc-editor.org/info/rfc6749/), the base OAuth 2.0 authorization framework this profile is describing.
+- `type` selects `authorizationCode` from OAuth 2.0's grant type registry.
+  - This mirrors the same pattern used by the Credential Object's `type: jwtBearer`: `implements` names the governing framework, `type` selects a specific flavour from within it.
+  - Other grant types (`clientCredentials`, `refreshToken`, and so on) would each be described as their own OAuth Profile Object instance, rather than folding every grant type into a single object with fields that only apply to some of them.
+  - A Security Profile can then extend this list to provide other values (for example `ciba`, although strictly speaking CIBA is an OpenID Connect profile).
+- `discovery` is a Discovery Object reference, resolved at runtime rather than restated as static `tokenUrl`/`authorizationUrl` values.
+- `authorizationRequest` is optional at the base OSS level, and references a Pushed Authorization Request (or an Access Request Object directly, where PAR isn't in play).
+  - The `authorizationRequest` tells a client which shape to expect when staging the request; nothing in the base object requires it to be set.
+- `pkce` indicates whether Proof Key for Code Exchange ([RFC 7636](https://www.rfc-editor.org/info/rfc7636/)) applies to this grant. As with `authorizationRequest`, this field exists on the base object because PKCE is an OAuth-bound mechanism, only forcing its value to `true` as a Security Profile concern.
+
+This shape lends itself to fulfilling FAPI 2.0 requirements, in the same way described for the JSON Web Token Object above. Under the Security Profile Framework, `implements` on this same object can be replaced with `Fapi2SecurityProfile`, at which point `authorizationRequest` becomes mandatory (a bare Authorization Code grant has no PAR requirement, so is not FAPI 2.0 compliant without it) and `pkce` is fixed to `true`. This is explored further in the FAPI 2.0 alignment section below.
+
+#### Referencing the OpenAPI Security Specification
+
+The final point to raise in this section is how OSS would referenced in an OAD.
+
+Based on previous discussions at TDC and the use of SAFs, this is expected to be as an `extends` clause, similar to the snippet below:
+
+```
+openapi: 3.3.0
+extends:
+  - OpenAPISecuritySpecification
+```
+
+Where `OpenAPISecuritySpecification` indicates the OSS. Clients or tools would resolve this indicator to a given SAF, and use that as a reference for parsing the OAD in question.
+
+> This approach requires greater discussion at TDC. While it approximately reflects the discussion with [Henry Andrews](https://github.com/handrews) on his ideas on the SAF framework, this likely needs to firming up into a more concrete shape, once this proposal has been progressed.
+
+### Alignment to Proposal: FAPI 2.0 Security Profile
+
+The objects described above map almost entirely to the objects required for FAPI 2.0. However, the objects described need color adding to them, to describe the specific shape and constraints that FAPI 2.0 applies.
+
+This is the _raison d'etre_ for the Security Profile Framework, in that it allows a Profile to be developed that extends OSS and then adds specific clauses.
+
+The expectation is that the Security Profile Framework is formed of two artefacts:
+
+- A specification document that describes the additional constraints.
+- A JSON Schema document that:
+  - Applies those constraints, as far as is practical, to the shape of OSS objects.
+  - Adds new objects where the OSS does not hold them.
+
+As an example of the constraints in question, the following are a sample taken from the FAPI 2.0 Security Profile at [Section 5.3.3.2-1](https://openid.net/specs/fapi-security-profile-2_0-final.html#section-5.3.3.2-1), which are constraints for the Client that are **enforced** by the Authorization Server. An annotation of how they are resolved is provided for each constraint.
+
+| Clause | Approach | Explanation |
+| --- | --- | --- |
+| _shall use the authorization code grant described in [RFC6749]_ | JSON Schema | Enforced in JSON Schema but disallowing other grant types |
+| _shall use pushed authorization requests according to [RFC9126]_ | JSON Schema | Authorization Request mandatory on the OAuth Profile Object and must be a Pushed Authorization Request |
+| _shall use PKCE [RFC7636] with S256 as the code challenge method_ | JSON Schema and Discovery | `pkce` set as a `const` to `true` in JSON Schema, Discovery provides `code_challenge_method` parameter only supporting `S256` |
+| _shall generate the PKCE challenge specifically for each authorization request and securely bind the challenge to the client and the user agent in which the flow was started_ | N/A | Client runtime concern |
+| _shall check the iss parameter in the authorization response according to [RFC9207] to prevent mix-up attacks_ | N/A | Client runtime concern |
+| _shall only send client_id and request_uri request parameters to the authorization endpoint (all other authorization request parameters are sent in the pushed authorization request according to [RFC9126])_ | OAD? | Could be enforced by the OAD itself that implements the profile - for discussion |
+| if using [OIDC], should not use nonce parameter values longer than 64 characters | N/A | Client runtime concern |
+
+Based on the annotations above the enforcement of Client constraints as list above can therefore be **_explicitly represented_**, where applicable in a Security Profile. A FAPI 2.0 Security Profile would be published to the Ecosystem Registry and referenceable in a given OAD:
+
+```
+openapi: 3.3.0
+extends:
+  - Fapi20SecurityProfile
+```
+
+The example below then shows how an OAuth Profile would be expressed in an OAD, with `profile` indicating additional constraints are imposed by the `Fapi20SecurityProfileAuthCodeFlow` Security Profile (the explicit naming is intentional by the way, as there is likely to be a `Fapi20SecurityProfileClientCredentialsFlow` in the making):
+
+```yaml
+AuthCodeFlow:
+  implements: Fapi20SecurityProfileAuthCodeFlow
+  type: authorizationCode
+  discovery:
+    $ref: "#/components/discovery/OAuthWellKnown"
+  mtls:
+    $ref: "#/components/mtls/TrustFrameworkCertificate"
+  authorizationRequest:
+    $ref: "#/components/authorizationRequests/PushedAuthorizationRequest"
+  scopes:
+    - account:read
+    - account:write
+```
+
+Where:
+
+- `profile` points to the Authorization Code grant type declared by the FAPI 2.0 Security Profile.
+- `type` is set to `authorizationCode`, which is retained due to the potential addition of a Client Credentials profile soon.
+- `discovery` is a Discovery Object.
+- `mtls` is the MTLS Object that defines the required certificate profile.
+- `authorizationRequest` is mandated to be a Pushed Authorization Request, based on the Security Profile JSON Schema applying this constraint.
+- As discussed above, `pkce` is removed completely as it is mandatory.
+- `scopes` are as before, but additional constraints could be applied (but this is enough detail for an example).
+
+This example is almost certainly incomplete, but provides an clear and deterministic view of how a Security Profile can overlay (no, not an Overlay) the OSS. Once clear and obvious addition, not added for the sake or brevity, is a [DPOP (RFC 9449)](https://datatracker.ietf.org/doc/html/rfc9449), which is effectively a Credential Object, implementing a JWS.
+
+Again, and for the avoidance of doubt: **This is what defines the security requirements for a given resource, and is intended to provide sufficient information to the Client to scaffold code to adhere to security constraints imposed by the Security Profile to access that resource.**
 
 ### Alignment to Proposal: GNAP
 
-GNAP, the Grant Negotiation and Authorization Protocol, is defined in [RFC 9635](https://www.rfc-editor.org/info/rfc9635/). Unlike FAPI 2.0, GNAP is not a profile of OAuth 2.0 — RFC 9635 states explicitly that "GNAP is not an extension of OAuth 2.0 and is not intended to be directly compatible with OAuth 2.0." This has a direct consequence for this Design View: the FAPI 2.0 section above works almost entirely by _constraining_ existing vocabulary (the Discovery Object, an OAuth Profile Object) via the Security Profile Framework. GNAP has no Discovery Object, no OAuth Flow, and no Authorization Request underneath it to constrain — so, unlike FAPI 2.0, it cannot be expressed as a Security Profile alone.
+GNAP is unlike FAPI 2.0 in that GNAP is not a profile of OAuth 2.0 (RFC 9635 states explicitly that _"GNAP is not an extension of OAuth 2.0 and is not intended to be directly compatible with OAuth 2.0."_)
 
-Considering the following components of GNAP:
+GNAP is therefore effectively a standalone security protocol and, based on the Design Constraints [above](#design-constraints), should fit into in the OSS directly. Taking this approach has merit, for the following reasons:
 
-- A **Client Instance** identifies itself to the AS by presenting a key directly in the grant request, rather than a pre-registered `client_id`, and must prove possession of that key using a proofing mechanism — `httpsig` ([RFC 9421](https://www.rfc-editor.org/info/rfc9421/), HTTP Message Signatures), `mtls` ([RFC 8705](https://www.rfc-editor.org/info/rfc8705/)), `dpop`, or an attached/detached JWS. GNAP forbids presenting a symmetric key by value.
-- A **grant request** is sent directly to the AS's grant endpoint (there is no separate Authorization Request/token exchange split as in OAuth) and progresses through explicit states — `processing`, `pending`, `approved`, `finalized` — rather than OAuth's single-shot redirect-and-exchange.
-- Where the AS cannot finalize a grant immediately, it returns a **continuation** response: a bound continuation access token and URI the client uses to resume or poll the pending request.
-- User involvement is negotiated via explicit **interaction start** (`redirect`, `app`, `user_code`, `user_code_uri`) and **interaction finish** (`redirect`, `push`) methods, declared by the client up front, rather than OAuth's implicit assumption of a browser redirect.
-- **Access tokens** are bound to the client's key by default (GNAP's equivalent of sender-constraining is the baseline, not an opt-in extension as it is for OAuth/FAPI via mTLS or DPoP); a token may still be flagged `bearer` where binding isn't required. A single grant can also yield access to multiple resources via `resource_references`, rather than one token per Operation/scope.
-- Resource Server integration (how an RS validates a GNAP-bound token) is described in a companion document, not yet published as an RFC (`draft-ietf-gnap-resource-servers`) — this is an external dependency the proposal cannot resolve.
+- **Provenance**: Adding a GNAP Object allows extension out of the box, as part of the core OSS vocabulary.
+- **Extensibility**: Should industry or ecosystem initiatives come along that leverage GNAP a security profile can be created from OSS using the Security Profile Framework (ideally published to the Ecosystem Registry).
 
-#### What this means for the OpenAPI Security Specification
+OSS therefore appears to be the right "home" for GNAP. Based on the objects described above, an initial release of the OSS should have built-in support for the following GNAP building blocks (extended beyond the examples described above):
 
-Because GNAP is itself a normative RFC describing a security feature — not a constraint on one — the table in [OpenAPI Security Specification](#openapi-security-specification) is the right home for its core vocabulary, consistent with how JSON Web Token and MTLS were added. Candidate new/extended objects:
+- **Discovery**: GNAP intentionally aims to limit discovery in its design, instead using one-or-more grant requests that allow Clients to be granted access to a given resource. However, "seeding" is required to understand the capabilities of the Authorization Server, and a [Discovery section](https://www.rfc-editor.org/info/rfc9635/#name-discovery) describes the supported parameters.
+- **Access Request**: The Access Request Object fits semantically into the space described by grant requests in GNAP, in that JSON payloads describe the access being requested from the GNAP Authorization Server. While these could adequately be described in core OAS, this does not make for a clear security enforcement pattern. Using Access Requests as a standalone object with different GNAP flavours seems sensible.
+- **MTLS**: While GNAP supports negotiation to an `mtls` proof, the features already highlighted above in actually creating an appropriate key and signed certificate are not defined in GNAP itself. An MTLS Object therefore can fulfill this function.
+- **JSON Web Tokens**: JSON Web Tokens, particularly JSON Web Signatures are implemented as a proof of possession approach in GNAP, both as a payload and as a detached signature. The proposed JSON Web Token Object can therefore provide the shape of the proof of possession (although there is a question where this lives, as the claims are mandated. Does it make sense to put in an OAD, or express it directly in OSS?)
 
-- **Grant Request Object** (new) — describes the shape of a GNAP grant request: the client key reference, the `access_token` request(s), and the interaction methods offered. This is GNAP's equivalent of the Discovery Object + OAuth Profile Object pairing, but there is no discovery step to lean on, so it likely needs to declare the AS grant endpoint directly rather than resolving it at runtime.
-- **Continuation Object** (new) — describes the continuation token/URI pattern used to resume a `pending` grant. No OAuth equivalent exists for this, since OAuth has no multi-turn negotiation state machine.
-- **Interaction Object** (new) — describes the interaction start/finish method(s) a client supports. Structurally closer to a Security Scheme discriminator than a payload shape.
-- **Credential Object** (extend) — add `httpsig`, `mtls`, and `dpop` as `type` values alongside the existing `jwtBearer`, backed by the JSON Web Token Object (for `dpop`/`jws`/`jwsd`) or the MTLS Object (for `mtls`) rather than new objects, per the Credential Object's existing rationale of separating "how the client authenticates" from "how the artifact is encoded".
-- **HTTP Message Signature Object** (new, possible) — `httpsig` (RFC 9421) proofs are not JWTs and don't fit the JSON Web Token Object's JOSE-shaped model, so representing them may need a sibling object rather than a variant of an existing one — this needs further design work rather than being assumed away.
-- **Discovery Object** (open question) — GNAP does not mandate an OIDC/RFC 8414-style metadata document the way OAuth/OIDC-based profiles do; the grant endpoint is simply known/configured. Whether the existing Discovery Object gains a minimal `type: gnapGrantEndpoint` variant, or whether GNAP bypasses Discovery entirely in favour of a URL directly on the Grant Request Object, is an open question rather than a given.
+There are other objects that are not covered in the examples above, however, the merit consideration as additional standalone objects. For example, HTTP Signatures are defined as a proof of possession mechanism alongside those discussed above. JSON Web Keys are used to define signing keys. However, GNAP oftentimes gives examples of these objects provided in grant requests - therefore fundamentally just a Schema Object, described by an Access Request - so having dedicated objects in OSS to support GNAP may be redundant from the outset.
 
-#### What this means for the Security Profile Framework
+These additional objects highlighted above actually raises a key design decision for GNAP: What belongs in the OSS and what belongs in an OAD? This requires iteration with TDC to ensure the correct and most appropriate separation of concerns in GNAP support.
 
-GNAP's own extensibility (multiple proofing mechanisms, multiple interaction methods, optional bearer tokens) means that, exactly as with OAuth and FAPI 2.0, a specific ecosystem building on GNAP will still need a Security Profile to be deployable and certifiable. None of this is needed to support GNAP itself — it only applies once a concrete GNAP-based profile exists:
+The extensibility of GNAP - multiple proofing mechanisms, multiple interaction methods, optional bearer tokens - means that, exactly as with OAuth and FAPI 2.0, a specific ecosystem building on GNAP will still need a Security Profile to be deployable and certifiable. None of this is needed to support GNAP itself — it only applies once a concrete GNAP-based profile exists:
 
 - Restricting which proofing mechanism(s) are permitted (e.g. mandating `httpsig` only, or forbidding `bearer` tokens so all access tokens are key-bound).
 - Restricting which interaction start/finish methods are permitted (e.g. mandating `redirect`/`redirect` only, ruling out `user_code` for machine-to-machine clients).
 - Mandatory or forbidden fields within the Grant Request (e.g. requiring specific `resource_references`, or subject-identifier claims), in the same way FAPI 2.0 mandates claims within a signed Request Object via [RFC 9101](https://www.rfc-editor.org/info/rfc9101/) (JAR).
-- Reusing, unchanged, the existing MTLS Object constraints (ciphers, TLS version, trust anchor) wherever `mtls` proofing is selected — this is a case where the Security Profile Framework work is already done, not new.
+- Reusing, unchanged, the existing MTLS Object constraints (ciphers, TLS version, trust anchor) wherever `mtls` proofing is selected.
 
-#### Challenging the initial expectation
-
-The expectation that GNAP belongs in the OpenAPI Security Specification, not the Security Profile Framework, holds for GNAP's core vocabulary — the table's own rule ("RFC describing a security feature" → OpenAPI Security Specification, maintained by the Security SIG) applies to RFC 9635 exactly as it does to RFC 7519 (JWT) or RFC 8705 (MTLS). But that rule is being stretched further than it has been so far: JWT and MTLS are _primitives_ reused across profiles, whereas GNAP is a complete alternative to OAuth 2.0 as the grant protocol itself. Two things follow that complicate a clean "GNAP = OpenAPI Security Specification" answer:
-
-1. GNAP has its own optionality (proofing method, interaction method, bearer-vs-bound) in the same way OAuth does — so, exactly as FAPI 2.0 constrains OAuth via the Security Profile Framework, any real deployment of GNAP will need an equivalent Security Profile layered on top of these new base objects. Supporting GNAP is therefore necessarily a two-part change, not a one-part change confined to the base spec.
-2. Not everything GNAP needs is new: its proofing mechanisms should extend the existing Credential/JSON Web Token/MTLS objects rather than duplicate them, so the honest scope of "new" OpenAPI Security Specification surface is narrower than "GNAP support" might suggest — mainly the Grant Request, Continuation, and Interaction objects, plus the open question of an HTTP Message Signature object.
+It is therefore envisaged that as interest in GNAP proliferates and GNAP-based security profiles are created they will be fully compatible with the proposal described in this document.
 
 ## Backwards compatibility
 
@@ -447,4 +512,6 @@ The intention is to open this up to review, and then challenge the parts of the 
 
 | Consideration | Rationale | Answer |
 | --- | --- | --- |
-| Best approach to Security Scheme Objects and new Security Specification objects co-existing | Need consensus on best approach, especially in terms of "what to use" for a given security requirement. Ideally the OAS would be instructive enough to indicate preference |  |
+| Best approach to Security Scheme Objects and new OSS objects co-existing | Need consensus on best approach, especially in terms of "what to use" for a given security requirement. Ideally the OAS would be instructive enough to indicate preference |  |
+| Discuss options for implementing GNAP | What is split between the OSS and an OAD in terms of the description of grant requests, especially in view of underlying security features and how they are expressed |  |
+| Components of a Security Profile | Do the proposed components make sense (specification, JSON Schema document) or are alternatives required |  |
